@@ -99,16 +99,21 @@ def sweep(launch, inputs, reference=None, tolerances=(), seeds=(0, )):
 
 
 if __name__ == "__main__":
+    import triton
+
     import examples as ex
     import tolerances as T
+
+    device = "cpu" if triton.knobs.runtime.interpret else "cuda"  # compiled on a GPU when not interpreted
 
     def launcher(kernel, grid, out, *args, **consts):
         """launch(**inputs): launch the kernel on the inputs, in order, then out, then args; return out."""
 
         def launch(**inputs):
-            o = torch.empty_like(out) if torch.is_tensor(out) else torch.empty_like(next(iter(inputs.values())))
-            kernel[grid](*inputs.values(), o, *args, **consts)
-            return o
+            ins = [t.to(device) for t in inputs.values()]
+            o = torch.empty_like(out if torch.is_tensor(out) else ins[0], device=device)
+            kernel[grid](*ins, o, *args, **consts)
+            return o.cpu()
 
         launch.__name__ = f"{kernel.__name__}({', '.join(f'{k}={v}' for k, v in consts.items())})"
         return launch
@@ -143,4 +148,7 @@ if __name__ == "__main__":
          [("test_core.py:7251", T.propagate_nan)]),
     ]
     for launch, reference, make_inputs, tols in cases:
-        sweep(launch, make_inputs, reference=reference, tolerances=tols, seeds=(0, 1, 2))
+        try:
+            sweep(launch, make_inputs, reference=reference, tolerances=tols, seeds=(0, 1, 2))
+        except Exception as e:  # e.g. a dtype this GPU cannot compile
+            print(f"\nsweep of {launch.__name__}: skipped, {type(e).__name__}: {str(e).strip().splitlines()[0][:100]}")

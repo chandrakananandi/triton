@@ -373,6 +373,17 @@ def enable(report_at_exit=True):
         atexit.register(report)
 
 
+def shadow_of(t):
+    """float64 shadow of a contiguous CPU tensor, as a kernel last stored it; its own value where nothing was stored."""
+    a = t.double().numpy().reshape(-1)
+    r = _memory.get(t.untyped_storage().data_ptr())
+    if r is None or not r.alive() or r.itemsize != t.element_size():
+        return a.reshape(t.shape)
+    idx = t.storage_offset() + np.arange(t.numel())
+    unchanged = r.valid[idx] & ((r.actual[idx] == a) | (np.isnan(r.actual[idx]) & np.isnan(a)))
+    return np.where(unchanged, r.shadow[idx], a).reshape(t.shape)
+
+
 def _kind(x):
     return np.select([np.isnan(x), x == np.inf, x == -np.inf, x == 0], [0, 1, 2, 3], 4)
 
